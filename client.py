@@ -138,3 +138,106 @@ def main():
                 client.send(f"DOWNLOAD@{filename}".encode(FORMAT))
                 res = client.recv(1024).decode(FORMAT)
                 resp_time = (time.time() - t1) * 1000
+                
+                res_data = res.split("@")
+                if res_data[0] == "ERROR":
+                    print(f"[ERROR] {res_data[1]}")
+                    continue
+
+                file_size = int(res_data[1])
+                client.send("READ@OK".encode(FORMAT))
+
+                print("Downloading {filename}...")
+                start = time.time()
+                received = 0
+                old_p = -1
+
+                f = open(filename, "wb")
+                while received < file_size:
+                    left = file_size - received
+                    if left < SIZE:
+                        chunk = client.recv(left)
+                    else:
+                        chunk = client.recv(SIZE)
+
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    received += len(chunk)
+                    p = int((received / file_size) * 100)
+                    if p != old_p
+                f.close()
+
+                end = time.time()
+                total_time = end - start
+                if total_time == 0:
+                    total_time = 0.001
+
+                mb_size = file_size / (1024 * 1024)
+                rate = mb_size / total_time
+
+                print(f"\nSize: {mb_size:.2f} MB")
+                print(f"Transfer Size: {total_time} seconds")
+                print(f"Average Size: {rate:.2f} MB/s")
+                print(f"Response Time: {resp_time.2f} ms")
+                print(f"[OK] Download completed.")
+
+        # delete file on server
+        elif cmd == "delete":
+            if len(data) < 2:
+                print("Error: missing filename")
+                continue
+
+            filename = data[1]
+            client.send(f"DELETE@{filename}".encode(FORMAT))
+            res = client.recv(1024).decode(FORMAT)
+            if "@" in res:
+                print(res.split("@")[1])
+            else:
+                print(res)
+
+        # list directory
+        elif cmd == "dir":
+            client.send("DIR@".encode(FORMAT))
+            res = client.recv(4096).decode(FORMAT)
+            if "@" in res:
+                print(res.split("@"[1]))
+            else: 
+                print(res)
+        
+        # create or delete subfolder
+        elif cmd == "subfolder":
+            if len(data) < 3:
+                print("Error: subfolder <create/delete> <path>")
+                continue
+
+            action = data[1].upper()
+            path = data[2]
+            client.send(f"SUBFOLDER@{action}@{path}".encode(FORMAT))
+            res = client.recv(1024).decode(FORMAT)
+            if "@" in res:
+                print(res.split("@")[1])
+            else:
+                print(res)
+            
+        # disconnect from server
+        elif cmd == "disconnect":
+            client.send("LOGOUT@".encode(FORMAT))
+            client.close()
+            print("[OK] Disconnected from server.")
+            break
+
+        else:
+            print("Invalid command.")
+
+if __name__ == "__main__":
+    main()
+
+
+
+
+
+
+
+
+
