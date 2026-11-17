@@ -1,6 +1,6 @@
 # The client portion of the server code. This will be used by both clients (in any test runs) to connect to the server host.
 
-# Importing neccessary packages.
+# Importing necessary packages.
 import os
 import socket
 import time
@@ -12,16 +12,19 @@ FORMAT = 'utf-8'
 
 # main function
 def main():
-    # The client makes an attempt to connect to the server.
     client = None
     connected = False
-    print('Connecting to server...')
+    # Prompts the user to enter the connect command.
+    print('To connect to the server, please enter the command \'connect <server IP Address> <server Port #>\'.')
 
+    # The application repeatedly waits for a command to be entered until the "disconnect" command is given.
     while True:
+        # Awaiting User Input
         user_input = input("> ").strip()
         if user_input == "":
             continue
 
+        # Splits command string into an array
         data = user_input.split(" ")
         cmd = data[0].lower()
 
@@ -31,11 +34,12 @@ def main():
                 print("Error: please enter IP and port")
                 continue
 
+            # Compiles the address from the inputted IP address and port #
             ip = data[1]
             port = int(data[2])
             addr = (ip, port)
 
-            # Authentication
+            # The client attempts to connect to the server
             try:
                 client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 client.connect(addr)
@@ -43,52 +47,63 @@ def main():
                 msg = client.recv(1024).decode(FORMAT)
                 print("[OK] Connected to server!")
 
+                # Upon a successful connection, the user is prompted to enter credentials.
+                # The password is hashed before being sent.
                 user = input("Username: ")
                 pw = input("Password: ")
                 hashed_pw = hashlib.sha256(pw.encode(FORMAT)).hexdigest()
 
+                # The credentials are sent to the server side
                 client.send(f"AUTH@{user}@{hashed_pw}".encode(FORMAT)).hexidigest()
                 auth_msg = client.recv(1024).decode(FORMAT)
 
+                # Upon a successful reply, the command list is presented.
                 if "OK" in auth_msg:
                     print("[OK] Authentication successful!")
                     connected = True
                     print("\n========== COMMAND MENU ==========")
-                    print("1. Upload")
-                    print("2. Download")
-                    print("3. Delete")
-                    print("4. Dir")
-                    print("5. Subfolder Create")
-                    print("6. Subfolder Delete")
-                    print("7. Disconnect")
+                    print("1. upload <file name>")
+                    print("2. download")
+                    print("3. delete")
+                    print("4. dir")
+                    print("5. subfolder create")
+                    print("6. subfolder delete")
+                    print("7. disconnect")
                     print("=====================================")
+                # Upon an unsuccessful reply, the connection is closed.
                 else:
                     print("[ERROR] Authentication failed")
                     client.close()
-
+            # Should an exception be raised while attempting the connection, an error message is displayed.
             except OSError:
                 print("[ERROR] Connection failed")
 
+        # The following is displayed if another command is entered before the client connects to the server. 
         elif not connected:
             print("Please connect to the server first.")
 
+        # Upload Operation.
         elif cmd == "upload":
             if len(data) < 2:
                 print("Error: missing filename")
                 continue
 
             filename = data[1]
+            # Error handling for if the file cannot be found
             if not os.path.exists(filename):
                 print("[ERROR] File not found")
                 continue
 
+            # The file is retrieved before the client sends an upload request to the server.
+            # The response time is recorded.
             file_size = os.path.getsize(filename)
             t1 = time.time()
             client.send(f"UPLOAD@{filename}@{file_size}".encode(FORMAT))
             res = client.recv(1024).decode(FORMAT)
             resp_time = (time.time() - t1) * 1000
 
-            # check if file exists already in server
+            # If the application receives a response that the file already exists,
+            # a prompt is given, asking to overwrite the file.
             if "OVERWRITE" in res:
                 ans = input("File exists. Overwrite? (y/n): ")
                 client.send(ans.encode(FORMAT))
@@ -97,11 +112,14 @@ def main():
                     continue
                 client.recv(1024)
 
+            # The uploading of the file.
             print(f"Uploading {filename}...")
             start = time.time()
             sent = 0
             old_p = -1
 
+            # The file is read piece-by-piece (in frames with a max size of SIZE)
+            # Once the entirety of the file is sent over, the file is closed.
             f = open(filename, "rb")
             while True:
                 bytes_read = f.read(SIZE)
@@ -115,25 +133,30 @@ def main():
                     old_p = p
             f.close()
 
+            # Upload time calculation 
             end = time.time()
             total_time = end - start
             if total_time == 0:
                 total_time = 0.001
 
+            # Upload rate calculation.
             mb_size = file_size / (1024 * 1024)
             rate = mb_size / total_time
 
+            # Displays upload metrics
             print(f"\nSize: {mb_size:.2f} MB")
             print(f"\nTransfer Time: {total_time:.2f} seconds")
             print(f"\nAverage Speed: {rate:.2f} MB/s")
             print(f"\nRespond Time: {resp_time:.2f} ms")
+
+            # Tells the server the upload is complete
             done_msg = client.recv(1024).decode(FORMAT)
             if "@" in done_msg:
                 print(done_msg.split("@")[1])
             else:
                 print(done_msg)
 
-            # download file from server
+        # Download Operation
         elif cmd == "download":
                 if len(data) < 2:
                     print("Error: missing filename")
