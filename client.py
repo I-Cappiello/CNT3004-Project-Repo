@@ -1,12 +1,18 @@
+# The client portion of the server code. This will be used by both clients (in any test runs) to connect to the server host.
+
+# Importing neccessary packages.
 import os
 import socket
 import time
 import hashlib
 
+# The maximum frame size and encoding format
 SIZE = 65536
 FORMAT = 'utf-8'
 
+# main function
 def main():
+    # The client makes an attempt to connect to the server.
     client = None
     connected = False
     print('Connecting to server...')
@@ -19,7 +25,7 @@ def main():
         data = user_input.split(" ")
         cmd = data[0].lower()
 
-        # connects to server
+        # Connection Operation
         if cmd == "connect":
             if len(data) < 3:
                 print("Error: please enter IP and port")
@@ -29,6 +35,7 @@ def main():
             port = int(data[2])
             addr = (ip, port)
 
+            # Authentication
             try:
                 client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 client.connect(addr)
@@ -165,7 +172,9 @@ def main():
                     f.write(chunk)
                     received += len(chunk)
                     p = int((received / file_size) * 100)
-                    if p != old_p
+                    if p != old_p:
+                        print(f"Progress: {p}%", end="\r")
+                        old_p = p
                 f.close()
 
                 end = time.time()
@@ -179,7 +188,7 @@ def main():
                 print(f"\nSize: {mb_size:.2f} MB")
                 print(f"Transfer Size: {total_time} seconds")
                 print(f"Average Size: {rate:.2f} MB/s")
-                print(f"Response Time: {resp_time.2f} ms")
+                print(f"Response Time: {resp_time:.2f} ms")
                 print(f"[OK] Download completed.")
 
         # delete file on server
