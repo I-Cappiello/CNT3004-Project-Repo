@@ -62,12 +62,12 @@ def main():
                     print("[OK] Authentication successful!")
                     connected = True
                     print("\n========== COMMAND MENU ==========")
-                    print("1. upload <file name>")
-                    print("2. download")
-                    print("3. delete")
+                    print("1. upload <filename>")
+                    print("2. download <filename>")
+                    print("3. delete <filename>")
                     print("4. dir")
-                    print("5. subfolder create")
-                    print("6. subfolder delete")
+                    print("5. subfolder create <dir>")
+                    print("6. subfolder delete <dir>")
                     print("7. disconnect")
                     print("=====================================")
                 # Upon an unsuccessful reply, the connection is closed.
