@@ -161,175 +161,175 @@ def main():
                         else:
                             print(f"\n[ERROR] {done_res.get('message' , 'Upload error')}")
 
-                    # download file (with interrupted transfer resume)
-                    elif cmd == "download":
-                        if len(data) < 2:
-                            print("Error: missing filename")
-                            continue
+        # download file (with interrupted transfer resume)
+        elif cmd == "download":
+            if len(data) < 2:
+                print("Error: missing filename")
+                continue
 
-                        remote_name = data[1]
-                        local_name = os.path.basename(remote_name)
-                        offset = 0
-                        saved_hash = ""
+            remote_name = data[1]
+            local_name = os.path.basename(remote_name)
+            offset = 0
+            saved_hash = ""
 
-                        # checks if a partial file exists from an interrupted download
-                        if os.path.isfile(local_name):
-                            part_size = os.path.getsize(local_name)
-                            if part_size > 0:
-                                ans = input(f"Partial file found ({part_size} bytes). Resume? (y/n): ")
-                                if ans.strip().lower() == "y":
-                                    offset = part_size
-                                    saved_hash = input("Enter file SHA-256 to resume (or press Enter to restart):").strip().lower()
-                                    if len(saved_hash) != 64:
-                                        offset = 0
+            # checks if a partial file exists from an interrupted download
+            if os.path.isfile(local_name):
+                part_size = os.path.getsize(local_name)
+                if part_size > 0:
+                    ans = input(f"Partial file found ({part_size} bytes). Resume? (y/n): ")
+                    if ans.strip().lower() == "y":
+                        offset = part_size
+                        saved_hash = input("Enter file SHA-256 to resume (or press Enter to restart):").strip().lower()
+                        if len(saved_hash) != 64:
+                            offset = 0
 
-                        req = {
-                            "id": uuid.uuid4().hex,
-                            "op": "download",
-                            "path": remote_name,
-                            "offset": offset
-                        }
-                        if offset > 0:
-                            req["sha256"] = saved_hash
+            req = {
+                "id": uuid.uuid4().hex,
+                "op": "download",
+                "path": remote_name,
+                "offset": offset
+            }
+            if offset > 0:
+                req["sha256"] = saved_hash
 
-                        t1 = time.time()
-                        send_message(conn, req)
-                        res = receive_message(conn)
-                        resp_time = (time.time() - t1) * 1000
+            t1 = time.time()
+            send_message(conn, req)
+            res = receive_message(conn)
+            resp_time = (time.time() - t1) * 1000
 
-                        if res.get("status") != "ready":
-                            print(f"[ERROR] {res.get('message', 'File not found')}")
-                            continue
+            if res.get("status") != "ready":
+                print(f"[ERROR] {res.get('message', 'File not found')}")
+                continue
 
-                        file_size = res["size"]
-                        start_offset = res.get("offset", 0)
-                        expected_hash = res["sha256"]
-                        send_message(conn, {"accept": True})
+            file_size = res["size"]
+            start_offset = res.get("offset", 0)
+            expected_hash = res["sha256"]
+            send_message(conn, {"accept": True})
 
-                        print(f"Downloading {remote_name} (SHA-256: {expected_hash})...")
-                        start = time.time()
-                        received = start_offset
-                        old_p = -1
-                        file_mode = "ab" if start_offset > 0 else "wb"
+            print(f"Downloading {remote_name} (SHA-256: {expected_hash})...")
+            start = time.time()
+            received = start_offset
+            old_p = -1
+            file_mode = "ab" if start_offset > 0 else "wb"
 
-                        try:
-                            f = open(local_name, file_mode)
-                            while received < file_size:
-                                left = file_size - received
-                                if left < CHUNK:
-                                    chunk = conn.recv(left)
-                                else:
-                                    chunk = conn.recv(CHUNK)
-                                if not chunk:
-                                    raise EOFError("Connection lost")
-                                f.write(chunk)
-                                received += len(chunk)
-                                if file_size > 0:
-                                    p = int((received / file_size) * 100)
-                                    if p != old_p:
-                                        print(f"Progress: {p}%", end="\r")
-                                        old_p = p
-                            f.close()
-                        except (OSError, EOFError):
-                            f.close()
-                            print(f"\n[ERROR] Download interrupted at {received}/{file_size} bytes. Partial file saved.")
-                            connected = False
-                            break
-
-                        actual_hash = sha256_file(local_name)
-                        is_valid = (actual_hash == expected_hash)
-                        send_message(conn, {"verified": is_valid})
-                        ack = receive_message(conn)
-
-                        total_time = time.time() - start
-                        if total_time == 0:
-                            total_time = 0.001
-
-                        mb_size = (file_size - start_offset) / (1024 * 1024)
-                        rate = mb_size / total_time
-
-                        # Displays the download metrics
-                        if is_valid and ack.get("status") == "ok":
-                            print(f"\nSize: {file_size / (1024 * 1024):.2f} MB")
-                            print(f"Transfer Size: {total_time:.2f} seconds")
-                            print(f"Average Speed: {rate:.2f} MB/s")
-                            print(f"Response Time: {resp_time:.2f} ms")
-                            print(f"[OK] Download completed.")
-                        else:
-                            print("\n[ERROR] File integrity check failed.")
-
-                    # delete file
-                    elif cmd == "delete":
-                        # Error handling if no filename was provided
-                        if len(data) < 2:
-                            print("Error: missing filename")
-                            continue
-                        # Sends deletion request to the server
-                        send_message(conn, {
-                            "id": uuid.uuid4().hex,
-                            "op": "delete",
-                            "path": data[2]
-                        })
-                        res = receive_message(conn)
-                        if res.get("status") == "ok":
-                            print(f"[OK] Deleted {data[1]}")
-                        else:
-                            print(f"[ERROR] {res.get('message', 'File not found')}")
-
-                    # list directory contents
-                    elif cmd == "dir":
-                        subpath = data[1] if len(data) > 1 else ""
-                        send_message(conn, {
-                            "id": uuid.uuid4().hex,
-                            "op": "dir",
-                            "path": subpath
-                        })
-                        res = receive_message(conn)
-                        if res.get("status") == "ok":
-                            entries = res.get("entries", [])
-                            if len(entries) == 0:
-                                print("Directory is empty.")
-                            else:
-                                for item in entries:
-                                    if item["type"] == "dir":
-                                        print(f"[DIR] {item['name']}")
-                                    else:
-                                        print(f"[FILE] {item['name']} ({item['bytes']} bytes")
-                        else:
-                            print(f"[ERROR] {res.get('message', 'Directory error')}")
-
-                    # subfolder create and delete
-                    elif cmd == "subfolder":
-                        parts = user_input.split(" ", 2)
-                        if len(parts) <  3 or parts[1].lower() not in ("create", "delete"):
-                            print("Error: subfolder <create/delete> <path>")
-                            continue
-
-                        op_name = "mkdir" if parts[1].lower() == "create" else "rmdir"
-                        send_message(conn, {
-                            "id": uuid.uuid4().hex,
-                            "op": op_name,
-                            "path": parts[2]
-                        })
-                        res = receive_message(conn)
-                        if res.get("status") == "ok":
-                            print(f"[OK] Subfolder {parts[1].lower()}d: {parts[2]}")
-                        else:
-                            print(f"[ERROR] {res.get('message', 'Subfolder error')}")
-
-                    # disconnect
-                    elif cmd == "disconnect":
-                        try:
-                            send_message(conn, {"id": uuid.uuid4().hex, "op": "disconnect"})
-                            receive_message(conn)
-                        except (OSError, EOFError, ProtocolError):
-                            pass
-                        conn.close()
-                        print("[OK] Disconnected from server.")
-                        break
-
+            try:
+                f = open(local_name, file_mode)
+                while received < file_size:
+                    left = file_size - received
+                    if left < CHUNK:
+                        chunk = conn.recv(left)
                     else:
-                        print("Invalid command.")
+                        chunk = conn.recv(CHUNK)
+                    if not chunk:
+                        raise EOFError("Connection lost")
+                    f.write(chunk)
+                    received += len(chunk)
+                    if file_size > 0:
+                        p = int((received / file_size) * 100)
+                        if p != old_p:
+                            print(f"Progress: {p}%", end="\r")
+                            old_p = p
+                f.close()
+            except (OSError, EOFError):
+                f.close()
+                print(f"\n[ERROR] Download interrupted at {received}/{file_size} bytes. Partial file saved.")
+                connected = False
+                break
+
+            actual_hash = sha256_file(local_name)
+            is_valid = (actual_hash == expected_hash)
+            send_message(conn, {"verified": is_valid})
+            ack = receive_message(conn)
+
+            total_time = time.time() - start
+            if total_time == 0:
+                total_time = 0.001
+
+            mb_size = (file_size - start_offset) / (1024 * 1024)
+            rate = mb_size / total_time
+
+            # Displays the download metrics
+            if is_valid and ack.get("status") == "ok":
+                print(f"\nSize: {file_size / (1024 * 1024):.2f} MB")
+                print(f"Transfer Size: {total_time:.2f} seconds")
+                print(f"Average Speed: {rate:.2f} MB/s")
+                print(f"Response Time: {resp_time:.2f} ms")
+                print(f"[OK] Download completed.")
+            else:
+                print("\n[ERROR] File integrity check failed.")
+
+        # delete file
+        elif cmd == "delete":
+            # Error handling if no filename was provided
+            if len(data) < 2:
+                print("Error: missing filename")
+                continue
+            # Sends deletion request to the server
+            send_message(conn, {
+                "id": uuid.uuid4().hex,
+                "op": "delete",
+                "path": data[2]
+            })
+            res = receive_message(conn)
+            if res.get("status") == "ok":
+                print(f"[OK] Deleted {data[1]}")
+            else:
+                print(f"[ERROR] {res.get('message', 'File not found')}")
+
+        # list directory contents
+        elif cmd == "dir":
+            subpath = data[1] if len(data) > 1 else ""
+            send_message(conn, {
+                "id": uuid.uuid4().hex,
+                "op": "dir",
+                "path": subpath
+            })
+            res = receive_message(conn)
+            if res.get("status") == "ok":
+                entries = res.get("entries", [])
+                if len(entries) == 0:
+                    print("Directory is empty.")
+                else:
+                    for item in entries:
+                        if item["type"] == "dir":
+                            print(f"[DIR] {item['name']}")
+                        else:
+                            print(f"[FILE] {item['name']} ({item['bytes']} bytes")
+            else:
+                print(f"[ERROR] {res.get('message', 'Directory error')}")
+
+        # subfolder create and delete
+        elif cmd == "subfolder":
+            parts = user_input.split(" ", 2)
+            if len(parts) <  3 or parts[1].lower() not in ("create", "delete"):
+                print("Error: subfolder <create/delete> <path>")
+                continue
+
+            op_name = "mkdir" if parts[1].lower() == "create" else "rmdir"
+            send_message(conn, {
+                "id": uuid.uuid4().hex,
+                "op": op_name,
+                "path": parts[2]
+            })
+            res = receive_message(conn)
+            if res.get("status") == "ok":
+                print(f"[OK] Subfolder {parts[1].lower()}d: {parts[2]}")
+            else:
+                print(f"[ERROR] {res.get('message', 'Subfolder error')}")
+
+        # disconnect
+        elif cmd == "disconnect":
+            try:
+                send_message(conn, {"id": uuid.uuid4().hex, "op": "disconnect"})
+                receive_message(conn)
+            except (OSError, EOFError, ProtocolError):
+                pass
+            conn.close()
+            print("[OK] Disconnected from server.")
+            break
+
+        else:
+            print("Invalid command.")
 
 if __name__ == "__main__":
     main()
