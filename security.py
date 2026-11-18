@@ -5,21 +5,20 @@ import os
 import re
 from pathlib import Path
 
-
+# Records the password hash and salt value into a dictonary, which is then returned
 def password_record(password):
     salt = os.urandom(16)
     return {'salt': salt.hex(), 'hash': derive(password, salt).hex()}
 
-
+# Generates a 32-bit cryptographic key
 def derive(password, salt):
     return hashlib.scrypt(password.encode('utf-8'), salt=salt, n=16384,
                           r=8, p=1, dklen=32, maxmem=64 * 1024 * 1024)
 
-
+# Comparest the hash derived from the given password and compares it to the hash on record
 def verify_password(password, record):
     return hmac.compare_digest(derive(password, bytes.fromhex(record['salt'])).hex(), record['hash'])
-
-
+ 
 def storage_path(root, name, allow_root=False):
     """Forbid traversal, device paths, alternate data streams, and symlinks.
 
