@@ -268,7 +268,7 @@ def main():
             send_message(conn, {
                 "id": uuid.uuid4().hex,
                 "op": "delete",
-                "path": data[2]
+                "path": data[1]
             })
             res = receive_message(conn)
             if res.get("status") == "ok":
@@ -294,7 +294,7 @@ def main():
                         if item["type"] == "dir":
                             print(f"[DIR] {item['name']}")
                         else:
-                            print(f"[FILE] {item['name']} ({item['bytes']} bytes")
+                            print(f"[FILE] {item['name']} ({item['bytes']} bytes)")
             else:
                 print(f"[ERROR] {res.get('message', 'Directory error')}")
 
