@@ -142,24 +142,24 @@ def main():
                             print(f"Progress: {p}%", end="\r")
                             old_p = p
 
-                        f.close()
+                f.close()
 
-                        done_res = receive_message(conn)
-                        total_time = time.time() - start
-                        if total_time == 0:
-                            total_time = 0.001
+                done_res = receive_message(conn)
+                total_time = time.time() - start
+                if total_time == 0:
+                    total_time = 0.001
 
-                        mb_size = file_size / (1024 * 1024)
-                        rate = mb_size / total_time
+                mb_size = file_size / (1024 * 1024)
+                rate = mb_size / total_time
 
-                        if done_res.get("status") == "ok":
-                            print(f"\nSize: {mb_size:.2f} MB")
-                            print(f"Transfer Time: {total_time:.2f} seconds")
-                            print(f"Average Size: {rate:.2f} MB/s")
-                            print(f"Response Time: {resp_time:.2f} ms")
-                            print(f"[OK] Upload completed.")
-                        else:
-                            print(f"\n[ERROR] {done_res.get('message' , 'Upload error')}")
+                if done_res.get("status") == "ok":
+                    print(f"\nSize: {mb_size:.2f} MB")
+                    print(f"Transfer Time: {total_time:.2f} seconds")
+                    print(f"Average Size: {rate:.2f} MB/s")
+                    print(f"Response Time: {resp_time:.2f} ms")
+                    print(f"[OK] Upload completed.")
+                else:
+                    print(f"\n[ERROR] {done_res.get('message' , 'Upload error')}")
 
         # download file (with interrupted transfer resume)
         elif cmd == "download":
