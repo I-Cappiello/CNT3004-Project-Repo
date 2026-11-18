@@ -66,24 +66,25 @@ def main():
                     print("2. download <filename>")
                     print("3. delete <filename>")
                     print("4. dir")
-                    print("5. subfolder create <dir>")
-                    print("6. subfolder delete <dir>")
+                    print("5. subfolder create <directory>")
+                    print("6. subfolder delete <directory>")
                     print("7. disconnect")
                     print("=====================================")
                 # Upon an unsuccessful reply, the connection is closed.
                 else:
                     print("[ERROR] Authentication failed")
                     client.close()
-            # Should an exception be raised while attempting the connection, an error message is displayed.
+            # Displays error message upon exception.
             except OSError:
                 print("[ERROR] Connection failed")
 
-        # The following is displayed if another command is entered before the client connects to the server. 
+        # Error message if another command is entered before the client connects to server. 
         elif not connected:
             print("Please connect to the server first.")
 
         # Upload Operation.
         elif cmd == "upload":
+            # Error handling if no file name is provided.
             if len(data) < 2:
                 print("Error: missing filename")
                 continue
@@ -158,30 +159,36 @@ def main():
 
         # Download Operation
         elif cmd == "download":
+                # Error handling if no file name is provided
                 if len(data) < 2:
                     print("Error: missing filename")
                     continue
 
                 filename = data[1]
 
+                # Sends download request to the server and records the time
                 t1 = time.time()
                 client.send(f"DOWNLOAD@{filename}".encode(FORMAT))
                 res = client.recv(1024).decode(FORMAT)
                 resp_time = (time.time() - t1) * 1000
-                
+
+                # Error handling if the server responds with an ERROR code
                 res_data = res.split("@")
                 if res_data[0] == "ERROR":
                     print(f"[ERROR] {res_data[1]}")
                     continue
 
+                # Determines the file size before sending confirmation back to the server
                 file_size = int(res_data[1])
                 client.send("READ@OK".encode(FORMAT))
 
+                # Initializes the download
                 print("Downloading {filename}...")
                 start = time.time()
                 received = 0
                 old_p = -1
 
+                # Starts downloading the file in chunks with a maximum size of SIZE
                 f = open(filename, "wb")
                 while received < file_size:
                     left = file_size - received
@@ -189,79 +196,93 @@ def main():
                         chunk = client.recv(left)
                     else:
                         chunk = client.recv(SIZE)
-
+        
                     if not chunk:
                         break
+                    # Writes data to the file
                     f.write(chunk)
                     received += len(chunk)
                     p = int((received / file_size) * 100)
                     if p != old_p:
                         print(f"Progress: {p}%", end="\r")
                         old_p = p
+                # Closes the file
                 f.close()
 
+                # Calculates the download time
                 end = time.time()
                 total_time = end - start
                 if total_time == 0:
                     total_time = 0.001
-
+                # Calculates the download rate
                 mb_size = file_size / (1024 * 1024)
                 rate = mb_size / total_time
-
+                # Displays the download metrics
                 print(f"\nSize: {mb_size:.2f} MB")
                 print(f"Transfer Size: {total_time} seconds")
                 print(f"Average Size: {rate:.2f} MB/s")
                 print(f"Response Time: {resp_time:.2f} ms")
                 print(f"[OK] Download completed.")
 
-        # delete file on server
+        # Delete operation
         elif cmd == "delete":
+            # Error handling if no filename was provided
             if len(data) < 2:
                 print("Error: missing filename")
                 continue
-
+            # Sends deletion request to the server
             filename = data[1]
             client.send(f"DELETE@{filename}".encode(FORMAT))
             res = client.recv(1024).decode(FORMAT)
+            # Displays server response
             if "@" in res:
                 print(res.split("@")[1])
             else:
                 print(res)
 
-        # list directory
+        # List Directories Operation
         elif cmd == "dir":
+            # Sends request to server
             client.send("DIR@".encode(FORMAT))
             res = client.recv(4096).decode(FORMAT)
+            # Displays server response
             if "@" in res:
                 print(res.split("@"[1]))
             else: 
                 print(res)
         
-        # create or delete subfolder
+        # Subfolder Operations
         elif cmd == "subfolder":
+            # Error handling if not enough arguments are provided
             if len(data) < 3:
                 print("Error: subfolder <create/delete> <path>")
                 continue
 
+            # Determines which subfolder action and path
             action = data[1].upper()
             path = data[2]
+            # Sends request to the server
             client.send(f"SUBFOLDER@{action}@{path}".encode(FORMAT))
             res = client.recv(1024).decode(FORMAT)
+            # Displays server response
             if "@" in res:
                 print(res.split("@")[1])
             else:
                 print(res)
             
-        # disconnect from server
+        # Disconnect Operation
         elif cmd == "disconnect":
+            # Sends LOGOUT request to server before closing connection
             client.send("LOGOUT@".encode(FORMAT))
             client.close()
             print("[OK] Disconnected from server.")
             break
 
+        # Error handling if input does not match any commands
         else:
             print("Invalid command.")
 
+# Runs main() when client.py is run directly.
 if __name__ == "__main__":
     main()
 
