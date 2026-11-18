@@ -1,0 +1,3 @@
+# Only setup.py certificate generation requires a third-party package.
+# The server, client, analysis, and text/WAV sample generation use the standard library.
+cryptography==50.0.0
