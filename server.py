@@ -15,57 +15,76 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Custom module imports
 from analysis import Metrics
 from protocol import CHUNK, VERSION, ProtocolError, receive_message, send_message, sha256_file
 from security import password_record, storage_path, verify_password
 
+# Creates a logger object called 'server'
 LOG = logging.getLogger('server')
 
+# Custom RequestError class
+# Allows creation of specific error codes related to requests
 class RequestError(Exception):
     def __init__(self, code, message):
         self.code = code
         super().__init__(message)
 
-
+# text_field validates client messages
 def text_field(message, field, default='', limit=500):
     value = message.get(field, default)
     if not isinstance(value, str) or len(value) > limit or any(ord(c) < 32 for c in value):
         raise RequestError('BAD_REQUEST', f'Invalid {field}')
     return value
 
-
+# integer validates integer values in a message
 def integer(message, key, default=0, maximum=10 * 1024**3):
     value = message.get(key, default)
     if type(value) is not int or not 0 <= value <= maximum:
         raise RequestError('BAD_REQUEST', f'Invalid {key}')
     return value
 
-
+# A class that handles the server information
 class FileServer:
+    # Defines the server's IP, port, storage directory, the directory for the server's user info and logs
+    # among other variables. It also defines default values for the server.
     def __init__(self, host='0.0.0.0', port=5000, storage='storage', cert='certs/server.crt',
                  key='certs/server.key', users='users.json', log='logs/server.csv',
                  timeout=120, max_clients=32, max_file_bytes=10 * 1024**3, send_delay=0):
+        # Host IP address and port number
         self.host, self.port = host, port
+        # Creates the directory where files will be stored
         self.root = Path(storage).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
+        # Loads user accounts from a user.json file
         self.users = json.loads(Path(users).read_text(encoding='utf-8'))
+        # Raises an exception if no accounts exist
         if not isinstance(self.users, dict) or not self.users:
             raise ValueError('Create at least one account with setup.py user')
+        # Creates a dummy password record
         self.dummy = password_record(uuid.uuid4().hex)
+        # TLS configuration
         self.context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         self.context.minimum_version = ssl.TLSVersion.TLSv1_2
         self.context.load_cert_chain(cert, key)
+        # Timeout, max file bytes, and send delay
         self.timeout, self.max_file_bytes, self.send_delay = timeout, max_file_bytes, send_delay
+        # Thread Management
         self.guard = threading.RLock()
         self.busy = set()
         self.sessions, self.threads = set(), set()
+        # Rate limiting authentication attempts
         self.auth_attempts = defaultdict(deque)
+        # Limits the maximum possible client connections (default = 32)
         self.slots = threading.BoundedSemaphore(max_clients)
+        # Handles shutdown
         self.stopping = threading.Event()
         self.ready = threading.Event()
         self.listener = None
+        # Creates the performance monitoring object, with the default log path being logs/server.csv
         self.metrics = Metrics(log)
-
+    # Prevents clients from performing conflicting operations on the same file/file path
+    # Checks if path overlaps. Reserves the path if not.
     @contextmanager
     def reserve(self, path):
         with self.guard:
@@ -77,14 +96,17 @@ class FileServer:
         finally:
             with self.guard:
                 self.busy.remove(path)
-
+                
+    # Converts the filename into a filesystem path
     def resolve(self, name, allow_root=False):
         try:
             return storage_path(self.root, name, allow_root)
         except ValueError as exc:
             raise RequestError('INVALID_PATH', str(exc)) from exc
 
+    # The server loop
     def serve_forever(self):
+        # Attempts to create and configure a socket
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
                 self.listener = listener
@@ -104,13 +126,17 @@ class FileServer:
                         if self.stopping.is_set():
                             break
                         raise
+                    # Rejects connection attempts if at capacity
                     if not self.slots.acquire(blocking=False):
                         raw.close()
                         continue
+                    # Creates thread for the new connection
                     thread = threading.Thread(target=self._worker, args=(raw, address), daemon=True)
                     with self.guard:
                         self.threads.add(thread)
                     thread.start()
+        # When stopping.is_set() is true (aka the shutdown notice is given), the server is shut down.
+        # Connections and threads are all closed.
         finally:
             self.shutdown()
             with self.guard:
@@ -119,8 +145,11 @@ class FileServer:
                 worker.join()
             self.metrics.close()
 
+    # Shutdown function
     def shutdown(self):
+        # Signals the server to stop accepting requests
         self.stopping.set()
+        # Attempts to shut down current connections
         with self.guard:
             sessions = list(self.sessions)
         for conn in sessions:
@@ -130,34 +159,43 @@ class FileServer:
                 pass
             conn.close()
 
+    # Handles client connection/worker threads
     def _worker(self, raw, address):
         conn = raw
+        # Generates a session ID
         session = uuid.uuid4().hex
         try:
+            # Sets the timeout period
             raw.settimeout(min(self.timeout, 15))
             with self.guard:
                 self.sessions.add(raw)
+            # Implements TLS
             conn = self.context.wrap_socket(raw, server_side=True, do_handshake_on_connect=False)
             with self.guard:
                 self.sessions.discard(raw)
                 self.sessions.add(conn)
             conn.do_handshake()
             conn.settimeout(self.timeout)
+            # Grabs authentication details
             auth = receive_message(conn)
             with self.guard:
+                # Rate Limit
                 attempts = self.auth_attempts[address[0]]
                 now = time.monotonic()
                 while attempts and attempts[0] < now - 60:
                     attempts.popleft()
+                # Blocks further attempts after 10 failed attempts
                 limited = len(attempts) >= 10
             user = auth.get('username', '')
             password = auth.get('password', '')
+            # Checks the validity of the credentials
             valid_shape = (auth.get('op') == 'auth' and auth.get('version') == VERSION
                            and isinstance(user, str) and len(user) <= 64
                            and isinstance(password, str) and len(password) <= 1024)
             valid = False
             if valid_shape and not limited:
                 valid = verify_password(password, self.users.get(user, self.dummy)) and user in self.users
+            # If the entered credentials are not valid or the rate limit is reached, it returns an error
             if not valid:
                 with self.guard:
                     if not limited:
@@ -165,10 +203,12 @@ class FileServer:
                 send_message(conn, {'status': 'error', 'code': 'AUTH_FAILED',
                                     'message': 'Authentication failed or rate limit reached'})
                 return
+            # If the entered credentials are valid
             send_message(conn, {'status': 'ok', 'session_id': session, 'version': VERSION})
             LOG.info('Connected user=%s peer=%s session=%s', user, address[0], session)
             while not self.stopping.is_set():
                 request = receive_message(conn)
+                # Passes the request
                 if not self.handle(conn, request, user, session):
                     break
         except (OSError, EOFError, ProtocolError, ValueError) as exc:
@@ -183,8 +223,10 @@ class FileServer:
             conn.close()
             self.slots.release()
 
+    # Determines which operation will be performed
     def handle(self, conn, req, user, session):
         start = time.perf_counter()
+        # Creates a dictionary that records aspects about the request
         row = dict(timestamp_utc=datetime.now(timezone.utc).isoformat(), side='server',
                    session_id=session, request_id=uuid.uuid4().hex, client=user,
                    operation='invalid', path='', bytes=0, file_bytes=0, offset=0,
@@ -198,6 +240,7 @@ class FileServer:
                 row['response_s'] = time.perf_counter() - start
                 responded = True
             send_message(conn, {'status': status, **kwargs})
+        # Extracts and validates request information
         try:
             row['request_id'] = text_field(req, 'id', limit=64)
             if not row['request_id']:
@@ -206,12 +249,15 @@ class FileServer:
             row['trial'] = text_field(req, 'trial', limit=80)
             row['load'] = integer(req, 'load', default=1, maximum=32)
             row['path'] = name = text_field(req, 'path')
+            # Disconnect Operation
             if op == 'disconnect':
                 reply(); row['status'] = 'ok'; return False
+            # If an invalid request slips through
             if op not in ('dir', 'mkdir', 'rmdir', 'delete', 'upload', 'download'):
                 raise RequestError('BAD_REQUEST', 'Unknown operation')
             with self.guard:
                 path = self.resolve(name, allow_root=op == 'dir')
+            # Directory List Operation
             if op == 'dir':
                 with self.guard:
                     if not path.is_dir():
@@ -227,14 +273,18 @@ class FileServer:
                 reply(entries=entries)
             else:
                 with self.reserve(path):
+                    # Upload Operation
                     if op == 'upload':
                         self.upload(conn, req, path, row, reply)
+                    # Download Operation
                     elif op == 'download':
                         self.download(conn, req, path, row, reply)
                     else:
                         with self.guard:
+                            # Create Directory Operation
                             if op == 'mkdir':
                                 path.mkdir()  
+                            # Delete Directory Operation
                             elif op == 'rmdir':
                                 if not path.is_dir():
                                     raise RequestError('NOT_FOUND', 'Directory does not exist')
@@ -242,12 +292,14 @@ class FileServer:
                                     raise RequestError('NOT_EMPTY', 'Only empty directories may be deleted')
                                 path.rmdir()
                             else:
+                                # If the file doesn't exist
                                 if not path.is_file():
                                     raise RequestError('NOT_FOUND', 'File does not exist')
                                 path.unlink()
                         reply()
             if row['status'] != 'cancelled':
                 row['status'] = 'ok'
+        # Error Handling
         except (RequestError, FileNotFoundError, FileExistsError, IsADirectoryError, NotADirectoryError, PermissionError) as exc:
             if row.get('_binary'):
                 row['error'] = 'CONNECTION_OR_IO_ERROR'
@@ -259,12 +311,14 @@ class FileServer:
         except (OSError, EOFError, ProtocolError):
             row['error'] = 'CONNECTION_OR_IO_ERROR'
             raise
+        # Records metrics
         finally:
             row['total_s'] = time.perf_counter() - start
             row['mb_s'] = row['bytes'] / 1_000_000 / row['transfer_s'] if row['transfer_s'] else 0
             self.metrics.record(**row)
         return True
 
+    # Upload Operation
     def upload(self, conn, req, path, row, reply):
         size = integer(req, 'size', maximum=self.max_file_bytes)
         digest = text_field(req, 'sha256', limit=64)
@@ -309,6 +363,7 @@ class FileServer:
             if os.path.exists(temporary):
                 os.unlink(temporary)
 
+    # Download Operation
     def download(self, conn, req, path, row, reply):
         if not path.is_file():
             raise RequestError('NOT_FOUND', 'File does not exist')
@@ -344,7 +399,7 @@ class FileServer:
             raise RequestError('HASH_MISMATCH', 'Client could not verify the downloaded file')
         reply('ok', bytes=row['bytes'], sha256=digest)
 
-
+# Main function
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--host', default='0.0.0.0'); parser.add_argument('--port', type=int, default=5000)
@@ -364,6 +419,6 @@ def main():
     except KeyboardInterrupt:
         pass
 
+# Runs main() when server.py is run directly.
 if __name__ == '__main__':
     main()
-
